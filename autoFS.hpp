@@ -18,8 +18,8 @@ class semiStencil
 		int merge_forward;
 		int L, M, N, iterations;
 		std::set<std::tuple<int, int, int>> forward_k, forward_j, forward_i, backward;
-		std::map<std::tuple<int, int, int>, std::string> stencil, fused;
-		void do_fusing (int k, int j, int i, std::string coe, int step);
+		std::map<std::tuple<int, int, int>, double> stencil, fused;
+		void do_fusing (int, int, int, double, int);
 	public:
 		semiStencil (int distance_, int step_num_, int merge_f) 
 			: distance (distance_), step_num (step_num_), merge_forward (merge_f)
@@ -56,7 +56,7 @@ int semiStencil::get_stencil (const std::string &filename)
 	}
 
 	int k, j, i;
-	std::string coe;
+	double coe;
 	std::string str;
 	while (!stcFile.eof()) {
 		stcFile >> str;
@@ -250,24 +250,25 @@ void semiStencil::partition () {
 }
 
 // fusing the stencil recursively
-void semiStencil::do_fusing(int k, int j, int i, std::string coe, int step)
+void semiStencil::do_fusing(int k, int j, int i, double coe, int step)
 {
 	if(step == 0) {
 		if (fused.find(std::make_tuple(k, j, i)) != fused.end())
-			fused[std::make_tuple(k, j, i)] += "+" + coe;
+			fused[std::make_tuple(k, j, i)] += coe;
 		else fused[std::make_tuple(k, j, i)] = coe;
 		return;
 	}
 
 	for (const auto &[point, coe0] : stencil) {
 		const auto &[k0, j0, i0] = point;
-		do_fusing(k + k0, j + j0, i + i0, coe + (step == step_num ? "" : "*") + coe0, step - 1);
+		//do_fusing(k + k0, j + j0, i + i0, coe + (step == step_num ? "" : "*") + coe0, step - 1);
+		do_fusing(k + k0, j + j0, i + i0, coe * coe0, step - 1);
 	}
 }
 
 void semiStencil::fusing ()
 {
-	do_fusing (0, 0, 0, "", step_num);
+	do_fusing (0, 0, 0, 1.0, step_num);
 	stencil = fused;
 }
 

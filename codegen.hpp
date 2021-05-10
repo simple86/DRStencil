@@ -66,6 +66,7 @@ void codeGen::header_gen ()
 	header << "# include <stdio.h>\n";
 	header << "# include <cuda.h>\n";
 	header << "# include \"common.hpp\"\n";
+	header << "# include <sys/time.h>" << std::endl;
 	header << "\n#define max(x,y) ((x) > (y) ? (x) : (y)) \n";
 	header << "#define min(x,y) ((x) < (y) ? (x) : (y)) \n";
 	header << "#define ceil(a,b) ((a) % (b) == 0 ? (a) / (b) : ((a) / (b) + 1)) \n";
@@ -94,6 +95,13 @@ void codeGen::header_gen ()
 	header << indent << "}\n";
 	header << "}\n" << "\n";
 
+	header << "double get_time() {\n";
+	header << indent << "struct timeval tv;\n";
+	header << indent << "double t;\n";
+	header << indent << "gettimeofday(&tv, (struct timezone *)0);\n";
+	header << indent << "t = tv.tv_sec + (double)tv.tv_usec * 1e-6;\n";
+	header << indent << "return t;\n";
+	header << "}\n";
 }
 
 void codeGen::gpu_code_gen ()
@@ -101,20 +109,21 @@ void codeGen::gpu_code_gen ()
 	std::string indent = "\t";
 
 	gpu_code << "__global__ void " << stencil_name << " (double *d_in, double *d_out)\n";
-	gpu_code << "{\n";
-	gpu_code << indent << "int i0 = (int)(blockIdx.x) * ((int)blockDim.x-Halo*2) + (int)(threadIdx.x);\n";
-	gpu_code << indent << "int i = (int)(threadIdx.x);\n";
-	gpu_code << indent << "int j0 = (int)(blockIdx.y) * ((int)blockDim.y-Halo*2) + (int)(threadIdx.y);\n";
-	gpu_code << indent << "int j = (int)(threadIdx.y);\n";
-	gpu_code << indent << "int k = (int)(blockIdx.z) * Sn;\n";
-	gpu_code << indent << "int k_ed = min(L - Halo, k + Sn + Halo);\n";
+	gpu_code << R"({
+	int i0 = (int)(blockIdx.x) * ((int)blockDim.x-Halo*2) + (int)(threadIdx.x);
+	int i = (int)(threadIdx.x);
+	int j0 = (int)(blockIdx.y) * ((int)blockDim.y-Halo*2) + (int)(threadIdx.y);
+	int j = (int)(threadIdx.y);
+	int k = (int)(blockIdx.z) * Sn;
+	int k_ed = min(L - Halo, k + Sn + Halo);
 
-	gpu_code << "\n";
-	gpu_code << indent << "double (*in)[M][N] = (double (*)[M][N]) d_in;\n";
-	gpu_code << indent << "double (*out)[M][N] = (double (*)[M][N]) d_out;\n";
+	double (*in)[M][N] = (double (*)[M][N]) d_in;
+	double (*out)[M][N] = (double (*)[M][N]) d_out;
 
-	gpu_code << "\n";
-	gpu_code << indent << "double __shared__ in_shm[Range][By][Bx];\n";
+	double __shared__ in_shm[Range][By][Bx];
+	double __shared__ out_shm[By-Halo*2][Bx-Halo*2];
+	double forward_k[Dist];
+	)" << std:: endl;
 
 	int low_k = fs_stencil->get_low_k ();
 	int high_k = fs_stencil->get_high_k ();
@@ -133,17 +142,39 @@ void codeGen::gpu_code_gen ()
 	}
 	gpu_code << std::endl;
 
+	gpu_code << indent << "if (k_st >= k_ed || j0 >= M || i0 >= N) return;" << std::endl;
+
 	gpu_code << indent << "// Initial loads" << std::endl;
-	gpu_code << indent << "if (k + " << high_k - 1 << " < k_ed && j0 < M && i0 < N) {" << std::endl;
+	//gpu_code << indent << "if (k + " << high_k - 1 << " < k_ed) {" << std::endl;
 	for (int i = low_k; i < 0; i ++) {
-		gpu_code << indent << indent << "if (k" << i << " < 0) in_shm[(k" << i<< "+Range)%Range][j][i] = 0;" << std::endl;
-		gpu_code << indent << indent << "else ";
+		gpu_code << indent << "if (k" << i << " < 0) in_shm[(k" << i<< "+Range)%Range][j][i] = 0;" << std::endl;
+		gpu_code << indent << "else ";
 		gpu_code << "in_shm[(k" << i << ")%Range][j][i] = in[k" << i << "][j0][i0];" << std::endl;
 	}
 	for (int i = (low_k > 0 ? low_k : 0); i < high_k; i ++) {
-		gpu_code << indent << indent << "in_shm[(k+" << i << ")%Range][j][i] = in[k+" << i << "][j0][i0];" << std::endl;
+		gpu_code << indent << "in_shm[(k+" << i << ")%Range][j][i] = in[k+" << i << "][j0][i0];" << std::endl;
 	}
-	gpu_code << indent << "}" << std::endl;
+	gpu_code << std::endl;
+	//gpu_code << indent << "}" << std::endl;
+
+
+	gpu_code << indent << "#pragma unroll" << std::endl;
+	gpu_code << indent << "for (; k < k_st; k ++) {" << std::endl;
+	for (int i = 0, j = low_k; j <= high_k; i ++, j ++) {
+		gpu_code << indent << indent << "k" << i << " = (k+" << (j+range)%range << ") % Range;" << std::endl;
+	}
+	gpu_code << indent << indent << "in_shm[k" << range - 1 << "][j][i] = in[k+" << high_k << "][j0][i0];" << std::endl << std::endl;
+	gpu_code << indent << indent << "__syncthreads ();" << std::endl;
+	// initial loads and forward k
+	gpu_code << indent << indent << "if (k < k_ed - Dist && j_ok && i_ok) {" << std::endl;
+	gpu_code << indent << indent << indent << "// forward k" << std::endl;
+	gpu_code << indent << indent << indent << "forward_k[k\%Dist] = " << fs_stencil->gen_forward_k () << ";" << std::endl;
+	gpu_code << indent << indent << "}" << std::endl;
+	gpu_code << indent << indent << "//__syncthreads ();" << std::endl;
+	gpu_code << indent << "}" << std::endl << std::endl;
+
+
+
 	gpu_code << indent << "__syncthreads ();" << std::endl;
 	gpu_code << indent << "#pragma unroll " << stream_unroll << std::endl;
 	gpu_code << indent << "for (; k < k_ed; k ++) {" << std::endl;
@@ -152,41 +183,49 @@ void codeGen::gpu_code_gen ()
 	}
 	gpu_code << indent << indent << "in_shm[k" << range - 1 << "][j][i] = in[k+" << high_k << "][j0][i0];" << std::endl << std::endl;
 	gpu_code << indent << indent << "//__syncthreads ();" << std::endl;
+
 	// forward k
-	gpu_code << indent << indent << "if (k < k_ed - Dist && j_ok && i_ok) {" << std::endl;
+	gpu_code << indent << indent << "if (j_ok && i_ok) {" << std::endl << std::endl;
+	gpu_code << indent << indent << indent << "out_shm[j-Halo][i-Halo] = forward_k[k\%Dist];" << std::endl << std::endl;
 	gpu_code << indent << indent << indent << "// forward k" << std::endl;
-	gpu_code << indent << indent << indent << "out[k+Dist][j0][i0] = " << fs_stencil->gen_forward_k () << ";" << std::endl;
+	gpu_code << indent << indent << indent << "if (k < k_ed - Dist)" << std::endl;
+	gpu_code << indent << indent << indent << indent << "forward_k[k\%Dist] = " << fs_stencil->gen_forward_k () << ";" << std::endl;
 	gpu_code << indent << indent << "}" << std::endl;
 	gpu_code << indent << indent << "__syncthreads ();" << std::endl;
 
 	// forward j
 	if (fs_stencil->forward_j_avilable ()) {
-		gpu_code << indent << indent << "if (k >= k_st && " 
+		gpu_code << indent << indent << "if (" 
 				<< (fs_stencil->get_order() == fs_stencil->get_distance() ? "" : "j >= Halo - Dist &&") 
 				<< " j0 < M - Halo - Dist && j < By - Halo - Dist && i_ok) {" << std::endl;
 		gpu_code << indent << indent << indent << "// forward j" << std::endl;
-		gpu_code << indent << indent << indent << "atomicAdd(&out[k][j0+Dist][i0], " << fs_stencil->gen_forward_j () << ");" << std::endl;
+		gpu_code << indent << indent << indent << "atomicAdd(&out_shm[j+Dist-Halo][i-Halo], " << fs_stencil->gen_forward_j () << ");" << std::endl;
 		gpu_code << indent << indent << "}" << std::endl;
 		gpu_code << indent << indent << "//__syncthreads ();" << std::endl;
 	}
 
 	// forward i
 	if (fs_stencil->forward_i_avilable ()) {
-		gpu_code << indent << indent << "if (k >= k_st && j_ok && " 
+		gpu_code << indent << indent << "if (j_ok && " 
 				<< (fs_stencil->get_order() == fs_stencil->get_distance() ? "" : "i >= Halo - Dist &&") 
 				<< " i0 < N - Halo - Dist && i < Bx - Halo - Dist) {" << std::endl;
 		gpu_code << indent << indent << indent << "// forward i" << std::endl;
-		gpu_code << indent << indent << indent << "atomicAdd(&out[k][j0][i0+Dist], " << fs_stencil->gen_forward_i () << ");" << std::endl;
+		gpu_code << indent << indent << indent << "atomicAdd(&out_shm[j-Halo][i+Dist-Halo], " << fs_stencil->gen_forward_i () << ");" << std::endl;
 		gpu_code << indent << indent << "}" << std::endl;
 		gpu_code << indent << indent << "//__syncthreads ();" << std::endl;
 	}
 
 	// backward
-	gpu_code << indent << indent << "if (k >= k_st && j_ok && i_ok) {" << std::endl;
+	gpu_code << indent << indent << "if (j_ok && i_ok) {" << std::endl;
 	gpu_code << indent << indent << indent << "// backward" << std::endl;
-	gpu_code << indent << indent << indent << "atomicAdd(&out[k][j0][i0], " << fs_stencil->gen_backward () << ");" << std::endl;
+	gpu_code << indent << indent << indent << "atomicAdd(&out_shm[j-Halo][i-Halo], " << fs_stencil->gen_backward () << ");" << std::endl;
 	gpu_code << indent << indent << "}" << std::endl;
 	gpu_code << indent << indent << "__syncthreads ();" << std::endl;
+
+	// write to global memory
+	gpu_code << indent << indent << "// write to global memory" << std::endl;
+	gpu_code << indent << indent << "if (j_ok && i_ok) " << std::endl;
+	gpu_code << indent << indent << indent << "out[k][j0][i0] = out_shm[j-Halo][i-Halo]; " << std::endl;
 
 	gpu_code << indent << "}" << std::endl;
 	gpu_code << "}" << std::endl;
@@ -217,14 +256,23 @@ int main(int argc, char **argv)
 	dim3 block_config(Bx, By, 1);
 	dim3 grid_config(ceil(N, Bx-Halo*2), ceil(M, By-Halo*2), ceil(L, Sn));
 
-	puts("GPU computing...");)" << std::endl;
+	puts("GPU computing...");
+
+	// warm up
+	for (int i = 0; i < 10; i ++) {)" << std::endl;	
+	host_code << indent << indent << stencil_name << "<<<grid_config, block_config>>> (in, out);" << std::endl;
+	host_code << indent << "}" << std::endl << std::endl;
+	//host_code << indent << "cudaEventRecord (startTime, 0);" << std::endl;
+	host_code << indent << "double startTime = get_time();" << std::endl;
 	host_code << indent << "for (int t = 0; t < Iterations; t += " << 2 * fs_stencil->get_step_num () <<") {" << std::endl;
 	host_code << indent << indent << stencil_name << "<<<grid_config, block_config>>> (in, out);" << std::endl;
 	host_code << indent << indent << stencil_name << "<<<grid_config, block_config>>> (out, in);" << std::endl;
 	host_code << indent << R"(}
 	cudaDeviceSynchronize();
+	double endTime = get_time();
 	check_error ("Kernel error");
 	puts("GPU finished computing.");
+	printf("GPU computation time: %f ms\n", 1000*(endTime - startTime));
 	)";
 	if (check_correctness) {
 		host_code << R"(
@@ -257,6 +305,9 @@ int main(int argc, char **argv)
 	cudaMemcpy(h_g_out, g_in, nbytes, cudaMemcpyDeviceToHost);		
 	double error = checkError3D (M, N, (double*)h_out, (double*)h_g_out, Halo, L-Halo, Halo, M-Halo, Halo, N-Halo);
 	printf("[Test] RMS Error: %e\n", error);
+
+	cudaFree(g_in);
+	cudaFree(g_out);
 	)";
 
 	}
@@ -274,6 +325,7 @@ std::string codeGen::gold_gpu_code_gen ()
 	std::stringstream out_code;
 	std::string indent ("\t");
 
+	out_code << std::endl;
 	out_code << "__global__ void gold_" << stencil_name << " (double *d_in, double *d_out)\n";
 	out_code << "{\n";
 	out_code << indent << "int i = (int)(blockIdx.x) * (int)(blockDim.x) + (int)(threadIdx.x);\n";
