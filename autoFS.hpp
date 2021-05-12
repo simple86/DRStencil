@@ -27,7 +27,7 @@ class semiStencil
 		int get_stencil (const std::string&);
 		void get_problem_size (int &, int &, int &, int &);
 		void set_order_distance ();
-		std::string print_in (const std::tuple<int, int, int>&, bool);
+		std::string print_in (const std::tuple<int, int, int>&, bool, bool, bool);
 		void semiGen ();
 		void partition ();
 		void fusing ();
@@ -37,10 +37,10 @@ class semiStencil
 		int get_low_k () { return low_k; }
 		int get_high_k () { return high_k; }
 		int get_step_num () { return step_num; }
-		std::string gen_forward_k ();
-		std::string gen_forward_j ();
-		std::string gen_forward_i ();
-		std::string gen_backward ();
+		std::string gen_forward_k (int, bool, bool);
+		std::string gen_forward_j (int, bool, bool);
+		std::string gen_forward_i (int, bool, bool);
+		std::string gen_backward (int, bool, bool);
 		bool forward_j_avilable () { return forward_j.size() > 0; }
 		bool forward_i_avilable () { return forward_i.size() > 0; }
 		std::string gen_gold ();
@@ -100,7 +100,7 @@ void semiStencil::set_order_distance ()
 	distance = ((high - low) >> 1);
 }
 
-std::string semiStencil::print_in(const std::tuple<int, int, int> &point, bool isGlobal)
+std::string semiStencil::print_in(const std::tuple<int, int, int> &point, bool merge_j, bool merge_i, bool isGlobal)
 {
 	const auto &[k, j, i] = point;
 	std::stringstream out;
@@ -109,66 +109,68 @@ std::string semiStencil::print_in(const std::tuple<int, int, int> &point, bool i
 	//out << k - low_k;
 	//if (k < 0) out << k;
 	out << "][j";
+	if (merge_j) out << "+mj";
 	if (j > 0) out << "+" << j;
 	if (j < 0) out << j;
 	out << "][i";
+	if (merge_i) out << "+mi";
 	if (i > 0) out << "+" << i;
 	if (i < 0) out << i;
 	out << "]";
 	return out.str();
 }
 
-std::string semiStencil::gen_forward_k ()
+std::string semiStencil::gen_forward_k (int cnt, bool merge_j, bool merge_i)
 {
 	std::stringstream out;
-	std::string indent = "\t\t\t\t";
+	std::string indent = "\t";
 	bool flag = false;
 	for (const auto &[k, j, i] : forward_k) {
-		if (flag) out << std::endl << indent <<"+ ";
+		if (flag) out << std::endl << std::string (cnt + 1, '\t') << "+ ";
 		else flag = true;
-		out << "(" << stencil[std::make_tuple(k-distance, j, i)] << ") * "  << print_in(std::make_tuple(k, j, i), false);
+		out << "(" << stencil[std::make_tuple(k-distance, j, i)] << ") * "  << print_in(std::make_tuple(k, j, i), merge_j, merge_i, false);
 	}
 	//out << ";" << std::endl;
 	return out.str();
 }
 
-std::string semiStencil::gen_forward_j ()
+std::string semiStencil::gen_forward_j (int cnt, bool merge_j, bool merge_i)
 {
 	std::stringstream out;
-	std::string indent = "\t\t\t\t";
+	std::string indent = "\t";
 	bool flag = false;
 	for (const auto &[k, j, i] : forward_j) {
-		if (flag) out << std::endl << indent <<"+ ";
+		if (flag) out << std::endl << std::string (cnt + 1, '\t') << "+ ";
 		else flag = true;
-		out << "(" << stencil[std::make_tuple(k, j-distance, i)] << ") * " << print_in(std::make_tuple(k, j, i), false);
+		out << "(" << stencil[std::make_tuple(k, j-distance, i)] << ") * " << print_in(std::make_tuple(k, j, i), merge_j, merge_i, false);
 	}
 	//out << ";" << std::endl;
 	return out.str();
 }
 
-std::string semiStencil::gen_forward_i ()
+std::string semiStencil::gen_forward_i (int cnt, bool merge_j, bool merge_i)
 {
 	std::stringstream out;
-	std::string indent = "\t\t\t\t";
+	std::string indent = "\t";
 	bool flag = false;
 	for (const auto &[k, j, i] : forward_i) {
-		if (flag) out << std::endl << indent <<"+ ";
+		if (flag) out << std::endl << std::string (cnt + 1, '\t') << "+ ";
 		else flag = true;
-		out << "(" << stencil[std::make_tuple(k, j, i-distance)] << ") * " << print_in(std::make_tuple(k, j, i), false);
+		out << "(" << stencil[std::make_tuple(k, j, i-distance)] << ") * " << print_in(std::make_tuple(k, j, i), merge_j, merge_i, false);
 	}
 	//out << ";" << std::endl;
 	return out.str();
 }
 
-std::string semiStencil::gen_backward ()
+std::string semiStencil::gen_backward (int cnt, bool merge_j, bool merge_i)
 {
 	std::stringstream out;
-	std::string indent = "\t\t\t\t";
+	std::string indent = "\t";
 	bool flag = false;
 	for (const auto &point : backward) {
-		if (flag) out << std::endl << indent <<"+ ";
+		if (flag) out << std::endl << std::string (cnt + 1, '\t') << "+ ";
 		else flag = true;
-		out << "(" << stencil[point] << ") * " << print_in(point, false);
+		out << "(" << stencil[point] << ") * " << print_in(point, merge_j, merge_i, false);
 	}
 	//out << ";" << std::endl;
 	return out.str();
@@ -185,7 +187,7 @@ std::string semiStencil::gen_gold ()
 	for (const auto &[point, coe] : stencil) {
 		if (flag) out << std::endl << indent << "+ ";
 		else flag = true;
-		out << "(" << coe << ") * " << print_in(point, true);
+		out << "(" << coe << ") * " << print_in(point, false, false, true);
 	}
 	out << ";" << std::endl;
 	return out.str();
