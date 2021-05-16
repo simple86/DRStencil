@@ -1,7 +1,9 @@
 # include <iostream>
 # include <string>
 # include "autoFS.hpp"
+# include "autoFS_2d.hpp"
 # include "codegen.hpp"
+# include "codegen_2d.hpp"
 using namespace std;
 
 
@@ -9,6 +11,9 @@ int main(int argc, char** argv)
 {
     string outfile ("-o");
     string out_name ("out.cu");
+
+    string _3d ("--3d");
+    bool is3d = false;
 
     string step ("--step");
     int step_num = 1;
@@ -56,13 +61,15 @@ int main(int argc, char** argv)
     }
     if (help.compare (argv[1]) == 0 || _h.compare (argv[1]) == 0) {
         cout << R"(
-    Generating fusion-semi stencil.
+    Generate data-reusing stencil.
 
     Usage: fsstencil [options] <input_stcfile>
 Options:
 
 -o <file>               Specify the name of output cuda file. 
                         (out.cu by default)
+
+--is3d                  Choose 3D mode.
 
 --step <num>            Specify the number of time steps to fuse the stencil.
                         (step_num = 1 by default)
@@ -108,6 +115,9 @@ Options:
             if (i != argc - 2)
                 out_name = argv[++i];
         }
+        else if (_3d.compare (argv[i]) == 0) {
+            is3d = true;
+        }
         else if (step.compare (argv[i]) == 0) {
             if (i != argc - 2)
                 step_num = atoi (argv[++i]);
@@ -127,26 +137,50 @@ Options:
         else if (stream_length.compare (argv[i]) == 0) {
             if (i != argc - 2)
                 sn = atoi (argv[++i]);
+            else {
+                cout << "Illegal input." << endl;
+                exit(-1);
+            }
         }
         else if (block_merge_x.compare (argv[i]) == 0) {
             if (i != argc - 2)
                 bmx = atoi (argv[++i]);
+            else {
+                cout << "Illegal input." << endl;
+                exit(-1);
+            }
         }
         else if (block_merge_y.compare (argv[i]) == 0) {
             if (i != argc - 2)
                 bmy = atoi (argv[++i]);
+            else {
+                cout << "Illegal input." << endl;
+                exit(-1);
+            }
         }
         else if (cyclic_merge_x.compare (argv[i]) == 0) {
             if (i != argc - 2)
                 cmx = atoi (argv[++i]);
+            else {
+                cout << "Illegal input." << endl;
+                exit(-1);
+            }
         }
         else if (cyclic_merge_y.compare (argv[i]) == 0) {
             if (i != argc - 2)
                 cmy = atoi (argv[++i]);
+            else {
+                cout << "Illegal input." << endl;
+                exit(-1);
+            }
         }
         else if (stream_unroll.compare (argv[i]) == 0) {
             if (i != argc - 2)
                 s_unroll = atoi (argv[++i]);
+            else {
+                cout << "Illegal input." << endl;
+                exit(-1);
+            }
         }
         else if (prefetch.compare (argv[i]) == 0) {
             pref = true;
@@ -154,6 +188,10 @@ Options:
         else if (merge_forward.compare (argv[i]) == 0) {
             if (i != argc - 2)
                 merge_f = atoi (argv[++i]);
+            else {
+                cout << "Illegal input." << endl;
+                exit(-1);
+            }
         }
         else if (check.compare (argv[i]) == 0) {
             check_correctness = true;
@@ -162,44 +200,79 @@ Options:
             isGold = true;
         }
         else {
-            cout << "Invalid input." << endl;
+            cout << "Illegal input." << endl;
             return 0;
         }
     }
 
     //cout << "Initiation ..." << endl;
-    semiStencil* fs_stencil = new semiStencil (distance, step_num, merge_f);
-
-    char* stcfile = argv[argc - 1];
-    if (fs_stencil->get_stencil (stcfile) != 0)
-        exit (-1);
-    //fs_stencil->gen_original ();
-    string stencil_name = stcfile;
-    stencil_name.erase (stencil_name.size() - 4);
+    if (is3d) {
+        DRStencil* dr_stencil = new DRStencil (distance, step_num, merge_f);
+        char* stcfile = argv[argc - 1];
+        if (dr_stencil->get_stencil (stcfile) != 0)
+            exit (-1);
+        //dr_stencil->gen_original ();
+        string stencil_name = stcfile;
+        stencil_name.erase (stencil_name.size() - 4);
     
-    // Fusing stencil
-    fs_stencil->fusing();
+        // Fusing stencil
+        dr_stencil->fusing();
 
-    if (isGold) {
+        if (isGold) {
         // set order (to get Halo)
-        fs_stencil->set_order_distance ();
-        codeGen* code = new codeGen (fs_stencil, stencil_name);
-        code->gold_code_gen ();
-        delete code;
-    }
-    else {
-        //cout << "Generating semi Stencil ... " << endl;
-        fs_stencil->semiGen();
+            dr_stencil->set_order_distance ();
+            codeGen* code = new codeGen (dr_stencil, stencil_name);
+            code->gold_code_gen ();
+            delete code;
+        }
+        else {
+            //cout << "Generating semi Stencil ... " << endl;
+            dr_stencil->semiGen();
 
-        bool bmerge_x = bmx > cmx;
-        bool bmerge_y = bmy > cmy;
-        int mx = bmerge_x ? bmx : cmx;
-        int my = bmerge_y ? bmy : cmy;
-        codeGen* code = new codeGen (fs_stencil, bx, by, sn, s_unroll, 
+            bool bmerge_x = bmx > cmx;
+            bool bmerge_y = bmy > cmy;
+            int mx = bmerge_x ? bmx : cmx;
+            int my = bmerge_y ? bmy : cmy;
+            codeGen* code = new codeGen (dr_stencil, bx, by, sn, s_unroll, 
                                     bmerge_x, bmerge_y, mx, my, pref,
                                     stencil_name, check_correctness);
-        code->output (out_name);
-        delete code;
+            code->output (out_name);
+            delete code;
+        }
+        delete dr_stencil;
+
     }
-    delete fs_stencil;
+    else {
+        DRStencil_2d* dr_stencil = new DRStencil_2d (distance, step_num, merge_f);
+        char* stcfile = argv[argc - 1];
+        if (dr_stencil->get_stencil (stcfile) != 0)
+            exit (-1);
+        //dr_stencil->gen_original ();
+        string stencil_name = stcfile;
+        stencil_name.erase (stencil_name.size() - 4);
+    
+        // Fusing stencil
+        dr_stencil->fusing();
+
+        if (isGold) {
+        // set order (to get Halo)
+            dr_stencil->set_order_distance ();
+            codeGen_2d* code = new codeGen_2d (dr_stencil, stencil_name);
+            code->gold_code_gen ();
+            delete code;
+        }
+        else {
+            //cout << "Generating semi Stencil ... " << endl;
+            dr_stencil->semiGen();
+
+            bool bmerge_x = bmx > cmx;
+            int mx = bmerge_x ? bmx : cmx;
+            codeGen_2d* code = new codeGen_2d (dr_stencil, bx, sn, s_unroll, 
+                                    bmerge_x, mx, pref,
+                                    stencil_name, check_correctness);
+            code->output (out_name);
+            delete code;
+        }
+        delete dr_stencil;
+    }
 }

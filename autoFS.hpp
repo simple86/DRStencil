@@ -11,7 +11,7 @@
 # include <algorithm>
 
 
-class semiStencil
+class DRStencil
 {
 	private:
 		int order, distance, step_num, low_k, high_k;
@@ -21,7 +21,7 @@ class semiStencil
 		std::map<std::tuple<int, int, int>, double> stencil, fused;
 		void do_fusing (int, int, int, double, int);
 	public:
-		semiStencil (int distance_, int step_num_, int merge_f) 
+		DRStencil (int distance_, int step_num_, int merge_f) 
 			: distance (distance_), step_num (step_num_), merge_forward (merge_f)
 			{}
 		int get_stencil (const std::string&);
@@ -47,7 +47,7 @@ class semiStencil
 };
 
 // Get stencil from .stc file.
-int semiStencil::get_stencil (const std::string &filename)
+int DRStencil::get_stencil (const std::string &filename)
 {
 	std::ifstream stcFile(filename, std::ios::in);
 	if (!stcFile) {
@@ -75,7 +75,7 @@ int semiStencil::get_stencil (const std::string &filename)
 	return 0;
 }
 
-void semiStencil::get_problem_size (int &l, int &m, int &n, int &iter)
+void DRStencil::get_problem_size (int &l, int &m, int &n, int &iter)
 {
 	l = L;
 	m = M;
@@ -83,7 +83,7 @@ void semiStencil::get_problem_size (int &l, int &m, int &n, int &iter)
 	iter = iterations;
 }
 
-void semiStencil::set_order_distance ()
+void DRStencil::set_order_distance ()
 {
 	// If the distance is not given, set distance.
 	int high = 0, low = 0;
@@ -100,7 +100,7 @@ void semiStencil::set_order_distance ()
 	distance = ((high - low) >> 1);
 }
 
-std::string semiStencil::print_in(const std::tuple<int, int, int> &point, bool merge_j, bool merge_i, bool isGlobal)
+std::string DRStencil::print_in(const std::tuple<int, int, int> &point, bool merge_j, bool merge_i, bool isGlobal)
 {
 	const auto &[k, j, i] = point;
 	std::stringstream out;
@@ -120,7 +120,7 @@ std::string semiStencil::print_in(const std::tuple<int, int, int> &point, bool m
 	return out.str();
 }
 
-std::string semiStencil::gen_forward_k (int cnt, bool merge_j, bool merge_i)
+std::string DRStencil::gen_forward_k (int cnt, bool merge_j, bool merge_i)
 {
 	std::stringstream out;
 	std::string indent = "\t";
@@ -134,7 +134,7 @@ std::string semiStencil::gen_forward_k (int cnt, bool merge_j, bool merge_i)
 	return out.str();
 }
 
-std::string semiStencil::gen_forward_j (int cnt, bool merge_j, bool merge_i)
+std::string DRStencil::gen_forward_j (int cnt, bool merge_j, bool merge_i)
 {
 	std::stringstream out;
 	std::string indent = "\t";
@@ -148,7 +148,7 @@ std::string semiStencil::gen_forward_j (int cnt, bool merge_j, bool merge_i)
 	return out.str();
 }
 
-std::string semiStencil::gen_forward_i (int cnt, bool merge_j, bool merge_i)
+std::string DRStencil::gen_forward_i (int cnt, bool merge_j, bool merge_i)
 {
 	std::stringstream out;
 	std::string indent = "\t";
@@ -162,7 +162,7 @@ std::string semiStencil::gen_forward_i (int cnt, bool merge_j, bool merge_i)
 	return out.str();
 }
 
-std::string semiStencil::gen_backward (int cnt, bool merge_j, bool merge_i)
+std::string DRStencil::gen_backward (int cnt, bool merge_j, bool merge_i)
 {
 	std::stringstream out;
 	std::string indent = "\t";
@@ -177,7 +177,7 @@ std::string semiStencil::gen_backward (int cnt, bool merge_j, bool merge_i)
 }
 
 // Generate naive code for error check.
-std::string semiStencil::gen_gold ()
+std::string DRStencil::gen_gold ()
 {
 	std::stringstream out;
 	out << "out[k][j][i] = ";
@@ -193,7 +193,7 @@ std::string semiStencil::gen_gold ()
 	return out.str();
 }
 
-void semiStencil::partition () {
+void DRStencil::partition () {
 
 	std::set<std::tuple<int, int, int> > contri_k, contri_j, contri_i;
 
@@ -252,7 +252,7 @@ void semiStencil::partition () {
 }
 
 // fusing the stencil recursively
-void semiStencil::do_fusing(int k, int j, int i, double coe, int step)
+void DRStencil::do_fusing(int k, int j, int i, double coe, int step)
 {
 	if(step == 0) {
 		if (fused.find(std::make_tuple(k, j, i)) != fused.end())
@@ -268,14 +268,14 @@ void semiStencil::do_fusing(int k, int j, int i, double coe, int step)
 	}
 }
 
-void semiStencil::fusing ()
+void DRStencil::fusing ()
 {
 	do_fusing (0, 0, 0, 1.0, step_num);
 	stencil = fused;
 }
 
 // calculate the range of points to fetch
-void semiStencil::cal_range ()
+void DRStencil::cal_range ()
 {
 	low_k = 1, high_k = -1;
 	for (const auto &[k, j, i] : forward_k) {
@@ -296,7 +296,7 @@ void semiStencil::cal_range ()
 	}
 }
 
-void semiStencil::semiGen()
+void DRStencil::semiGen()
 {
 	set_order_distance ();
 	//std::cout << "Dividing the stencil into several part ..." << std::endl;
