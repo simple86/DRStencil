@@ -21,7 +21,7 @@ int main(int argc, char** argv)
     string block_y ("--by");
     int by = 16;
     string stream_length ("--sn");
-    int sn = 8;
+    int sn = 16;
     
     string stream_unroll ("--stream-unroll");
     int s_unroll = 4;
@@ -34,6 +34,9 @@ int main(int argc, char** argv)
     int cmx = 1;
     string cyclic_merge_y ("--cyclic-merge-y");
     int cmy = 1;
+
+    string prefetch ("--prefetch");
+    bool pref = false;
 
     string merge_forward ("--merge-forward");
     int merge_f = 5;
@@ -73,7 +76,7 @@ Options:
                         (by = 16 by default)
 
 --sn <num>              Specify the length of stream block sn.
-                        (sn = 8 by default)
+                        (sn = 16 by default)
 
 --stream-unroll <num>   Specify the unroll factor of the streaming for loop.
                         (stream_unroll = 4 by default)
@@ -85,6 +88,8 @@ Options:
 --cyclic-merge-x <num>  Specify the number of points for cyclic merging along dimension x.
 
 --cyclic-merge-y <num>  Specify the number of points for cyclic merging along dimension y.
+
+--prefetch              Prefetch input data to hide the tranfer latency.
 
 --merge-forward <num>   Specify the threshold for whether to merge the forward_j or forward_i into backward,
                         since the overhead may offset the gain from partitation.
@@ -143,6 +148,9 @@ Options:
             if (i != argc - 2)
                 s_unroll = atoi (argv[++i]);
         }
+        else if (prefetch.compare (argv[i]) == 0) {
+            pref = true;
+        }
         else if (merge_forward.compare (argv[i]) == 0) {
             if (i != argc - 2)
                 merge_f = atoi (argv[++i]);
@@ -188,7 +196,7 @@ Options:
         int mx = bmerge_x ? bmx : cmx;
         int my = bmerge_y ? bmy : cmy;
         codeGen* code = new codeGen (fs_stencil, bx, by, sn, s_unroll, 
-                                    bmerge_x, bmerge_y, mx, my, 
+                                    bmerge_x, bmerge_y, mx, my, pref,
                                     stencil_name, check_correctness);
         code->output (out_name);
         delete code;
