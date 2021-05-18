@@ -27,7 +27,7 @@ class DRStencil_2d
 		int get_stencil (const std::string&);
 		void get_problem_size (int &, int &, int &);
 		void set_order_distance ();
-		std::string print_in (const std::tuple<int, int>&, bool, bool);
+		std::string print_in (const std::tuple<int, int>&, bool, bool, bool, bool);
 		void semiGen ();
 		void partition ();
 		void fusing ();
@@ -37,9 +37,9 @@ class DRStencil_2d
 		int get_low_j () { return low_j; }
 		int get_high_j () { return high_j; }
 		int get_step_num () { return step_num; }
-		std::string gen_forward_j (int, bool);
-		std::string gen_forward_i (int, bool);
-		std::string gen_backward (int, bool);
+		std::string gen_forward_j (int, bool, bool, bool);
+		std::string gen_forward_i (int, bool, bool, bool);
+		std::string gen_backward (int, bool, bool, bool);
 		bool forward_i_avilable () { return forward_i.size() > 0; }
 		std::string gen_gold ();
 };
@@ -96,12 +96,17 @@ void DRStencil_2d::set_order_distance ()
 	distance = ((high - low) >> 1);
 }
 
-std::string DRStencil_2d::print_in(const std::tuple<int, int> &point, bool merge_i, bool isGlobal)
+std::string DRStencil_2d::print_in(const std::tuple<int, int> &point, bool streaming, bool merge_j, bool merge_i, bool isGlobal)
 {
 	const auto &[j, i] = point;
 	std::stringstream out;
 	if (isGlobal) out << "in[j" << (j < 0 ? "" : "+" ) << j;
-	else out << "in_shm[j" << j - low_j;
+	else if (streaming) out << "in_shm[j" << j - low_j;
+    else {
+        out << "in_shm[j" << (merge_j ? "+mj" : "");
+	    if (j > 0) out << "+" << j;
+	    if (j < 0) out << j;
+    }
 	//out << j - low_j;
 	//if (j < 0) out << j;
 	out << "][i";
@@ -112,7 +117,7 @@ std::string DRStencil_2d::print_in(const std::tuple<int, int> &point, bool merge
 	return out.str();
 }
 
-std::string DRStencil_2d::gen_forward_j (int cnt, bool merge_i)
+std::string DRStencil_2d::gen_forward_j (int cnt, bool streaming, bool merge_j, bool merge_i)
 {
 	std::stringstream out;
 	std::string indent = "\t";
@@ -120,14 +125,14 @@ std::string DRStencil_2d::gen_forward_j (int cnt, bool merge_i)
 	for (const auto &[j, i] : forward_j) {
 		if (flag) out << std::endl << std::string (cnt + 1, '\t') << "+ ";
 		else flag = true;
-		out << "(" << stencil[std::make_tuple(j-distance, i)] << ") * "  << print_in(std::make_tuple(j, i), merge_i, false);
+		out << "(" << stencil[std::make_tuple(j-distance, i)] << ") * "  << print_in(std::make_tuple(j, i), streaming, merge_j, merge_i, false);
 	}
 	//out << ";" << std::endl;
 	return out.str();
 }
 
 
-std::string DRStencil_2d::gen_forward_i (int cnt, bool merge_i)
+std::string DRStencil_2d::gen_forward_i (int cnt, bool streaming, bool merge_j, bool merge_i)
 {
 	std::stringstream out;
 	std::string indent = "\t";
@@ -135,13 +140,13 @@ std::string DRStencil_2d::gen_forward_i (int cnt, bool merge_i)
 	for (const auto &[j, i] : forward_i) {
 		if (flag) out << std::endl << std::string (cnt + 1, '\t') << "+ ";
 		else flag = true;
-		out << "(" << stencil[std::make_tuple(j, i-distance)] << ") * " << print_in(std::make_tuple(j, i), merge_i, false);
+		out << "(" << stencil[std::make_tuple(j, i-distance)] << ") * " << print_in(std::make_tuple(j, i), streaming, merge_j, merge_i, false);
 	}
 	//out << ";" << std::endl;
 	return out.str();
 }
 
-std::string DRStencil_2d::gen_backward (int cnt, bool merge_i)
+std::string DRStencil_2d::gen_backward (int cnt, bool streaming, bool merge_j, bool merge_i)
 {
 	std::stringstream out;
 	std::string indent = "\t";
@@ -149,7 +154,7 @@ std::string DRStencil_2d::gen_backward (int cnt, bool merge_i)
 	for (const auto &point : backward) {
 		if (flag) out << std::endl << std::string (cnt + 1, '\t') << "+ ";
 		else flag = true;
-		out << "(" << stencil[point] << ") * " << print_in(point, merge_i, false);
+		out << "(" << stencil[point] << ") * " << print_in(point, streaming, merge_j, merge_i, false);
 	}
 	//out << ";" << std::endl;
 	return out.str();
@@ -166,7 +171,7 @@ std::string DRStencil_2d::gen_gold ()
 	for (const auto &[point, coe] : stencil) {
 		if (flag) out << std::endl << indent << "+ ";
 		else flag = true;
-		out << "(" << coe << ") * " << print_in(point, false, true);
+		out << "(" << coe << ") * " << print_in(point, false, false, false, true);
 	}
 	out << ";" << std::endl;
 	return out.str();

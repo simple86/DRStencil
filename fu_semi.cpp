@@ -4,6 +4,7 @@
 # include "autoFS_2d.hpp"
 # include "codegen.hpp"
 # include "codegen_2d.hpp"
+//# include "codegen_2d_no_stream.hpp"
 using namespace std;
 
 
@@ -20,6 +21,9 @@ int main(int argc, char** argv)
 
     string dist ("--dist");
     int distance = 0;
+
+    string streaming_ ("--streaming");
+    bool streaming = false;
 
     string block_x ("--bx");
     int bx = 16;
@@ -76,6 +80,8 @@ Options:
 
 --dist <num>            Specify the number of the distance between points for semi-stencil.
 
+--streaming             Not using streaming optimization.
+
 --bx <num>              Specify the block size bx.
                         (bx = 16 by default)
 
@@ -121,18 +127,37 @@ Options:
         else if (step.compare (argv[i]) == 0) {
             if (i != argc - 2)
                 step_num = atoi (argv[++i]);
+            else {
+                cout << "Illegal input." << endl;
+                exit(-1);
+            }
         }
         else if (dist.compare (argv[i]) == 0) {
             if (i != argc - 2)
                 distance = atoi (argv[++i]);
+            else {
+                cout << "Illegal input." << endl;
+                exit(-1);
+            }
+        }
+        else if (streaming_.compare (argv[i]) == 0) {
+            streaming = true;
         }
         else if (block_x.compare (argv[i]) == 0) {
             if (i != argc - 2)
                 bx = atoi (argv[++i]);
+            else {
+                cout << "Illegal input." << endl;
+                exit(-1);
+            }
         }
         else if (block_y.compare (argv[i]) == 0) {
             if (i != argc - 2)
                 by = atoi (argv[++i]);
+            else {
+                cout << "Illegal input." << endl;
+                exit(-1);
+            }
         }
         else if (stream_length.compare (argv[i]) == 0) {
             if (i != argc - 2)
@@ -205,6 +230,11 @@ Options:
         }
     }
 
+    bool bmerge_x = bmx > cmx;
+    bool bmerge_y = bmy > cmy;
+    int mx = bmerge_x ? bmx : cmx;
+    int my = bmerge_y ? bmy : cmy;
+
     //cout << "Initiation ..." << endl;
     if (is3d) {
         DRStencil* dr_stencil = new DRStencil (distance, step_num, merge_f);
@@ -218,29 +248,15 @@ Options:
         // Fusing stencil
         dr_stencil->fusing();
 
-        if (isGold) {
-        // set order (to get Halo)
-            dr_stencil->set_order_distance ();
-            codeGen* code = new codeGen (dr_stencil, stencil_name);
-            code->gold_code_gen ();
-            delete code;
-        }
-        else {
-            //cout << "Generating semi Stencil ... " << endl;
-            dr_stencil->semiGen();
+        //cout << "Generating semi Stencil ... " << endl;
+        dr_stencil->semiGen();
 
-            bool bmerge_x = bmx > cmx;
-            bool bmerge_y = bmy > cmy;
-            int mx = bmerge_x ? bmx : cmx;
-            int my = bmerge_y ? bmy : cmy;
-            codeGen* code = new codeGen (dr_stencil, bx, by, sn, s_unroll, 
-                                    bmerge_x, bmerge_y, mx, my, pref,
-                                    stencil_name, check_correctness);
-            code->output (out_name);
-            delete code;
-        }
+        codeGen* code = new codeGen (dr_stencil, bx, by, sn, s_unroll, 
+                                bmerge_x, bmerge_y, mx, my, pref,
+                                stencil_name, check_correctness);
+        code->output (out_name);
+        delete code;
         delete dr_stencil;
-
     }
     else {
         DRStencil_2d* dr_stencil = new DRStencil_2d (distance, step_num, merge_f);
@@ -253,26 +269,16 @@ Options:
     
         // Fusing stencil
         dr_stencil->fusing();
+        
+        //cout << "Generating semi Stencil ... " << endl;
+        dr_stencil->semiGen();
 
-        if (isGold) {
-        // set order (to get Halo)
-            dr_stencil->set_order_distance ();
-            codeGen_2d* code = new codeGen_2d (dr_stencil, stencil_name);
-            code->gold_code_gen ();
-            delete code;
-        }
-        else {
-            //cout << "Generating semi Stencil ... " << endl;
-            dr_stencil->semiGen();
-
-            bool bmerge_x = bmx > cmx;
-            int mx = bmerge_x ? bmx : cmx;
-            codeGen_2d* code = new codeGen_2d (dr_stencil, bx, sn, s_unroll, 
-                                    bmerge_x, mx, pref,
-                                    stencil_name, check_correctness);
-            code->output (out_name);
-            delete code;
-        }
+        codeGen_2d* code = new codeGen_2d (dr_stencil, bx, by, streaming, sn, s_unroll, 
+                               bmerge_x, bmerge_y, mx, my, pref,
+                               stencil_name, check_correctness);
+        code->output (out_name);
+        delete code;
         delete dr_stencil;
     }
+    return 0;
 }

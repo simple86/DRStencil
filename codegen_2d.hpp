@@ -15,11 +15,12 @@ class codeGen_2d
 		std::stringstream host_code;
 		std::stringstream gold_code;
 		DRStencil_2d* dr_stencil;
-		int bx, sn;
+		int bx, by, sn;
 		int M, N, iterations;
+        bool streaming;
 		int stream_unroll;
-		bool bmerge_x; // true for block merging, false for cyclic merging
-		int mx;
+		bool bmerge_x, bmerge_y; // true for block merging, false for cyclic merging
+		int mx, my;
         bool prefetch;
 		std::string stencil_name;
 		bool check_correctness;
@@ -27,15 +28,16 @@ class codeGen_2d
 		std::string for_declare (int&);
 		void header_gen ();
 		void gpu_code_gen ();
+		void gpu_code_gen_streaming ();
 		void host_code_gen ();
 		std::string gold_gpu_code_gen ();
 	public:
-		codeGen_2d (DRStencil_2d* drs, int bx_, int sn_, int s_unroll, 
-				bool bmerge_x_, int mx_, bool pref,
+		codeGen_2d (DRStencil_2d* drs, int bx_, int by_, bool streaming_, int sn_, int s_unroll, 
+				bool bmerge_x_, bool bmerge_y_, int mx_, int my_, bool pref,
 				std::string stc_name, bool check) 
-			: dr_stencil (drs), bx (bx_), sn (sn_), stream_unroll (s_unroll), 
-				bmerge_x (bmerge_x_), mx (mx_), prefetch (pref),
-				stencil_name (stc_name), check_correctness (check)
+			: dr_stencil (drs), bx (bx_), by (by_), streaming (streaming_), sn (sn_), 
+                stream_unroll (s_unroll), bmerge_x (bmerge_x_), bmerge_y (bmerge_y_), 
+                mx (mx_), my (my_), prefetch (pref),stencil_name (stc_name), check_correctness (check)
 			{}
 		codeGen_2d (DRStencil_2d* drs, std::string stc_name) 
 			: dr_stencil (drs), stencil_name (stc_name) 
@@ -54,7 +56,10 @@ void codeGen_2d::output (const std::string & out_name)
 	}
 
 	header_gen ();
-	gpu_code_gen ();
+    if (streaming)
+	    gpu_code_gen_streaming ();
+    else 
+        gpu_code_gen ();
 	host_code_gen ();
 
 	std::ofstream outfile;
@@ -84,11 +89,15 @@ void codeGen_2d::header_gen ()
 	header << "#define N " << N << std::endl;
 	header << "#define Iterations " << iterations << std::endl;
 	header << std::endl;
-	header << "#define Range " << dr_stencil->get_high_j () - dr_stencil->get_low_j () + 1 << std::endl;
+    if (streaming)
+	    header << "#define Range " << dr_stencil->get_high_j () - dr_stencil->get_low_j () + 1 << std::endl;
 	header << "#define Halo " << dr_stencil->get_order () << std::endl;
 	header << "#define Dist " << dr_stencil->get_distance () << std::endl;
 	header << "#define Bx " << bx << std::endl;
-	header << "#define Sn " << sn << std::endl;
+    if (streaming)
+	    header << "#define Sn " << sn << std::endl;
+    else
+	    header << "#define By " << by << std::endl;
 	header << std::endl;
 
 	std::string indent = "\t";
@@ -113,6 +122,16 @@ void codeGen_2d::header_gen ()
 std::string codeGen_2d::for_declare (int &indent_cnt)
 {
     std::stringstream code;
+	if (!streaming && my > 1) {
+		code << std::string(indent_cnt, '\t') << "#pragma unroll " << my << std::endl;
+		if (bmerge_y) 
+			code << std::string(indent_cnt, '\t') << "for (int mj = 0; mj < "
+						<< my << "; mj ++) {" << std::endl;
+		else // cyclic merging
+			code << std::string(indent_cnt, '\t') << "for (int mj = 0, mj_1 = 0; mj_1 < "
+						<< my << "; mj_1 ++, mj += blockDim.y) {" << std::endl;
+		indent_cnt ++;
+	}
 	if (mx > 1) {
 		code << std::string(indent_cnt, '\t') << "#pragma unroll " << mx << std::endl;
 		if (bmerge_x) 
@@ -127,7 +146,7 @@ std::string codeGen_2d::for_declare (int &indent_cnt)
     return code.str();
 }
 
-void codeGen_2d::gpu_code_gen ()
+void codeGen_2d::gpu_code_gen_streaming ()
 {
 	std::string indent = "\t";
     int indent_cnt = 1;
@@ -251,7 +270,7 @@ void codeGen_2d::gpu_code_gen ()
     if (prefetch) {
         gpu_code << std::string(indent_cnt, '\t') << "pre"
                 << (mx > 1 ? "[0]" : "") 
-                << " = in[j+" << range - 1 << "][i0];" << std::endl;
+                << " = in[j+" << high_j + 1 << "][i0];" << std::endl;
         for (int i = 1; i < mx; i ++) {
             gpu_code << std::string(indent_cnt, '\t') << "if ("
                     << (i ? "i0 + " + std::to_string(i) + (bmerge_x && i ? "" : " * Bx") + " < N" : "") << ") pre"
@@ -268,7 +287,7 @@ void codeGen_2d::gpu_code_gen ()
             << (mx > 1 ? (bmerge_x ? "[mi]" : "[mi_1]") : "") << ") {" << std::endl;
 
 	gpu_code << std::string(indent_cnt, '\t') << "out[j+Dist][" << index_i0
-			<< "] = " << dr_stencil->gen_forward_j (indent_cnt, mx>1) << ";" << std::endl;
+			<< "] = " << dr_stencil->gen_forward_j (indent_cnt, true, false, mx>1) << ";" << std::endl;
 
 	gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl;
 	if (mx > 1) gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl; 
@@ -307,7 +326,7 @@ void codeGen_2d::gpu_code_gen ()
         gpu_code << std::string(indent_cnt, '\t') << "// prefetching input data for next iteration" << std::endl;
         gpu_code << std::string(indent_cnt, '\t') << "pre"
                 << (mx > 1 ? "[0]" : "") 
-                << " = in[j+" << range - 1 << "][i0];" << std::endl;
+                << " = in[j+" << high_j + 1 << "][i0];" << std::endl;
         for (int i = 1; i < mx; i ++) {
             gpu_code << std::string(indent_cnt, '\t') << "if ("
                     << (i ? "i0 + " + std::to_string(i) + (bmerge_x ? "" : " * Bx") + " < N" : "") << ") pre"
@@ -324,14 +343,14 @@ void codeGen_2d::gpu_code_gen ()
     // forward j
 	gpu_code << std::string(indent_cnt, '\t') << "// forward j" << std::endl;
 	gpu_code << std::string(indent_cnt, '\t') << "out[j+Dist][" << index_i0
-			<< "] = " << dr_stencil->gen_forward_j (indent_cnt, mx>1) << ";" << std::endl
+			<< "] = " << dr_stencil->gen_forward_j (indent_cnt, true, false, mx>1) << ";" << std::endl
             << std::endl;
 
     // backward
 	gpu_code << std::string(indent_cnt, '\t') << "// backward" << std::endl;
 	gpu_code << std::string(indent_cnt, '\t') << "atomicAdd(&out[j]["
 			<< index_i0 << "], "
-			<< dr_stencil->gen_backward (indent_cnt, mx > 1) << ");" << std::endl;
+			<< dr_stencil->gen_backward (indent_cnt, true, false, mx > 1) << ");" << std::endl;
 	gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl << std::endl;
 
 	// forward i
@@ -343,8 +362,8 @@ void codeGen_2d::gpu_code_gen ()
                     : " && " + index_i + " >= Halo-Dist) {") << std::endl;
 		gpu_code << std::string(indent_cnt, '\t') << "atomicAdd(&out[j]["
 				<< index_i0 << "+Dist], " 
-				<< dr_stencil->gen_forward_i (indent_cnt, mx > 1) << ");" << std::endl;
-		gpu_code << std::string(indent_cnt --, '\t') << "}" << std::endl << std::endl;
+				<< dr_stencil->gen_forward_i (indent_cnt, true, false, mx > 1) << ");" << std::endl;
+		gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl << std::endl;
 	}
 
 	if (mx > 1) gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl; 
@@ -385,7 +404,7 @@ void codeGen_2d::gpu_code_gen ()
 	    gpu_code << std::string(indent_cnt ++, '\t') << "if (j+1 < j_ed) {" << std::endl;
         gpu_code << std::string(indent_cnt, '\t') << "pre"
                 << (mx > 1 ? "[0]" : "") 
-                << " = in[j+" << range - 1 << "][i0];" << std::endl;
+                << " = in[j+" << high_j + 1 << "][i0];" << std::endl;
         for (int i = 1; i < mx; i ++) {
             gpu_code << std::string(indent_cnt, '\t') << "if ("
                     << (i ? "i0 + " + std::to_string(i) + (bmerge_x ? "" : " * Bx") + " < N" : "") << ") pre"
@@ -403,7 +422,7 @@ void codeGen_2d::gpu_code_gen ()
 	gpu_code << std::string(indent_cnt, '\t') << "// backward" << std::endl;
 	gpu_code << std::string(indent_cnt, '\t') << "atomicAdd(&out[j]["
 			<< index_i0 << "], "
-			<< dr_stencil->gen_backward (indent_cnt, mx > 1) << ");" << std::endl;
+			<< dr_stencil->gen_backward (indent_cnt, true, false, mx > 1) << ");" << std::endl;
 	gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl << std::endl;
 
 
@@ -416,8 +435,8 @@ void codeGen_2d::gpu_code_gen ()
                     : " && " + index_i + " >= Halo-Dist) {") << std::endl;
 		gpu_code << std::string(indent_cnt, '\t') << "atomicAdd(&out[j]["
 				<< index_i0 << "+Dist], " 
-				<< dr_stencil->gen_forward_i (indent_cnt, mx > 1) << ");" << std::endl;
-		gpu_code << std::string(indent_cnt --, '\t') << "}" << std::endl;
+				<< dr_stencil->gen_forward_i (indent_cnt, true, false, mx > 1) << ");" << std::endl;
+		gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl;
 	}
 
 	if (mx > 1) gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl; 
@@ -430,6 +449,113 @@ void codeGen_2d::gpu_code_gen ()
     gpu_code << std::string(indent_cnt, '\t') << "j" << range - 1 << " = temp" << ";" << std::endl; 
 	gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl;
 
+
+	gpu_code << "}" << std::endl;
+}
+
+void codeGen_2d::gpu_code_gen ()
+{
+	std::string indent = "\t";
+    int indent_cnt = 1;
+
+	gpu_code << "__global__ void " << stencil_name << " (double *d_in, double *d_out)\n";
+	gpu_code << "{" << std::endl;
+	// index i
+	gpu_code << std::string(indent_cnt, '\t') << "int i = " << (bmerge_x && mx > 1 ? std::to_string(mx) + "*" : "" ) 
+			<< "(int)(threadIdx.x);" << std::endl;
+	gpu_code << std::string(indent_cnt, '\t') << "int i0 = (int)(blockIdx.x) * (" 
+			<< (mx > 1 ? std::to_string(mx) + "*" : "") 
+			<< "(int)blockDim.x-Halo*2) + i;" << std::endl;
+	// index j
+	gpu_code << std::string(indent_cnt, '\t') << "int j = " << (bmerge_y && my > 1 ? std::to_string(my) + "*" : "" ) 
+			<< "(int)(threadIdx.y);" << std::endl;
+	gpu_code << std::string(indent_cnt, '\t') << "int j0 = (int)(blockIdx.y) * (" 
+			<< (my > 1 ? std::to_string(my) + "*" : "") 
+			<< "(int)blockDim.y-Halo*2) + j;" << std::endl;
+	gpu_code << R"(
+
+	double (*in)[N] = (double (*)[N]) d_in;
+	double (*out)[N] = (double (*)[N]) d_out;
+	)" << std::endl;
+
+	// variables declations
+	gpu_code << std::string(indent_cnt, '\t') << "double __shared__ in_shm[" 
+			<< (my > 1 ? std::to_string(my) + "*" : "") << "By]["
+			<< (mx > 1 ? std::to_string(mx) + "*" : "") << "Bx];" << std::endl;
+	gpu_code << std::endl;;
+   
+	gpu_code << std::string(indent_cnt, '\t') << "// Initial loads" << std::endl;
+
+    std::string index_j = "j" + std::string(my > 1 ? "+mj" : "");
+    std::string index_j0 = "j0" + std::string(my > 1 ? "+mj" : "");
+    std::string index_i = "i" + std::string(mx > 1 ? "+mi" : "");
+    std::string index_i0 = "i0" + std::string(mx > 1 ? "+mi" : "");
+
+
+	// load data
+    if (mx > 1 || my > 1) gpu_code << for_declare (indent_cnt);
+
+    gpu_code << std::string(indent_cnt ++, '\t') << "if (" << index_j0 << " < M && "
+            << index_i0 << " < N) {" << std::endl;
+
+    gpu_code << std::string(indent_cnt, '\t') << "in_shm[" << index_j << "]["
+			<< index_i << "] = in[" << index_j0 << "][" << index_i0 << "];" << std::endl;
+
+    gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl; 
+	if (mx > 1) gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl; 
+	if (my > 1) gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl;
+	gpu_code << std::string(indent_cnt, '\t') << "__syncthreads ();" << std::endl;
+	gpu_code << std::endl;
+
+
+    if (mx > 1 || my > 1) gpu_code << for_declare (indent_cnt);
+	
+	// forward j
+	gpu_code << std::string(indent_cnt, '\t') << "// forward j" << std::endl;
+    gpu_code << std::string(indent_cnt ++, '\t') << "if (" << index_j << " < By*" << my << "-Halo-Dist && "
+            << index_j0 << " < M-Halo-Dist && " 
+            << (dr_stencil->get_order() == dr_stencil->get_distance() ? "" 
+                : index_j + " >= Halo-Dist && ")
+            << index_i << " >= Halo && " << index_i << " < Bx*" << mx << "-Halo && "
+            << index_i0 << " < N-Halo) { " << std::endl;
+	gpu_code << std::string(indent_cnt, '\t') << "out["
+				<< index_j0 << "+Dist][" << index_i0 << "] = "
+				<< dr_stencil->gen_forward_j (indent_cnt, false, my > 1, mx > 1) << ";" << std::endl;
+	gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl << std::endl;
+	if (mx > 1) gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl; 
+	if (my > 1) gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl;
+	gpu_code << std::string(indent_cnt, '\t') << "__syncthreads ();" << std::endl;
+
+    if (mx > 1 || my > 1) gpu_code << for_declare (indent_cnt);
+    // backward
+	gpu_code << std::string(indent_cnt, '\t') << "// backward" << std::endl;
+    gpu_code << std::string(indent_cnt ++, '\t') << "if (" << index_j << " >= Halo && " 
+            << index_j << " < By*" << my << "-Halo && "
+            << index_j0 << " < M-Halo && " 
+            << index_i << " >= Halo && " << index_i << " < Bx*" << mx << "-Halo && "
+            << index_i0 << " < N-Halo) { " << std::endl;
+	gpu_code << std::string(indent_cnt, '\t') << "atomicAdd(&out["
+			<< index_j0 << "][" << index_i0 << "], "
+			<< dr_stencil->gen_backward (indent_cnt, false, my > 1, mx > 1) << ");" << std::endl;
+	gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl << std::endl;
+
+	// forward i
+	if (dr_stencil->forward_i_avilable ()) {
+		gpu_code << std::string(indent_cnt, '\t') << "// forward i" << std::endl;
+		gpu_code << std::string(indent_cnt ++, '\t') << "if (" << index_i << " < Bx*" << mx << "-Halo-Dist && "
+                << index_i0 << " < N-Halo-Dist && " 
+                << (dr_stencil->get_order() == dr_stencil->get_distance() ? "" 
+                    : index_i + " >= Halo-Dist && ")
+                << index_j << " >= Halo && " << index_j << " < By*" << my << "-Halo && "
+                << index_j0 << " < M-Halo) {" << std::endl;
+		gpu_code << std::string(indent_cnt, '\t') << "atomicAdd(&out["
+				<< index_j0 << "][" << index_i0 << "+Dist], " 
+				<< dr_stencil->gen_forward_i (indent_cnt, false, my > 1, mx > 1) << ");" << std::endl;
+		gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl << std::endl;
+	}
+
+	if (mx > 1) gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl; 
+	if (my > 1) gpu_code << std::string(-- indent_cnt, '\t') << "}" << std::endl;
 
 	gpu_code << "}" << std::endl;
 }
@@ -455,10 +581,23 @@ int main(int argc, char **argv)
 	cudaMalloc (&out, nbytes);
 	check_error ("Failed to allocate device memory for out.\n");
 	cudaMemcpy (out, h_out, nbytes, cudaMemcpyHostToDevice);
-	
+    )" << std::endl;	
+    if (streaming) {
+        host_code << R"(
 	dim3 block_config(Bx, 1);
 	dim3 grid_config(ceil(N, )";
-	host_code << (mx > 1 ? std::to_string(mx) + "*" : "") << R"(Bx-Halo*2), ceil(M, Sn));
+	    host_code << (mx > 1 ? std::to_string(mx) + "*" : "") << "Bx-Halo*2), ceil(M, Sn));" << std::endl;
+    }
+    else {
+        host_code << R"(
+    dim3 block_config(Bx, By);
+	dim3 grid_config(ceil(N,)";
+	    host_code << (mx > 1 ? std::to_string(mx) + "*" : "") << "Bx-Halo*2), ceil(M, ";
+	    host_code << (my > 1 ? std::to_string(my) + "*" : "") << "By-Halo*2));" << std::endl;
+
+    }
+
+    host_code << R"(
 
 	puts("GPU computing...");
 
