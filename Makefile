@@ -1,9 +1,9 @@
 CC=g++
 FLAGS=-g -O3 -std=c++17
 
-.DEFAULT_GOAL:= fsstencil
+.DEFAULT_GOAL:= drstencil
 
-fsstencil : 
-	$(CC) $(FLAGS) -o fsstencil fu_semi.cpp
+drstencil : 
+	$(CC) $(FLAGS) -o drstencil main.cpp
 clean:
-	rm fsstencil
+	rm drstencil

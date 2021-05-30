@@ -1,2 +1,2 @@
-# FSStencil
-Automatic generation of GPU code for fusion-semi stencil.
+# DRStencil
+Automatic generation of GPU code for data-reusing stencil.

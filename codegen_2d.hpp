@@ -4,7 +4,7 @@
 # include <sstream>
 # include <vector>
 # include <tuple>
-# include "autoFS_2d.hpp"
+# include "drstencil_2d.hpp"
 
 
 class codeGen_2d 
@@ -151,7 +151,7 @@ void codeGen_2d::gpu_code_gen_streaming ()
 	std::string indent = "\t";
     int indent_cnt = 1;
 
-	gpu_code << "__global__ void " << stencil_name << " (double *d_in, double *d_out)\n";
+	gpu_code << "__global__ void dr_" << stencil_name << " (double *d_in, double *d_out)\n";
 	gpu_code << "{" << std::endl;
 	// index i
 	gpu_code << std::string(indent_cnt, '\t') << "int i = " << (bmerge_x && mx > 1 ? std::to_string(mx) + "*" : "" ) 
@@ -458,7 +458,7 @@ void codeGen_2d::gpu_code_gen ()
 	std::string indent = "\t";
     int indent_cnt = 1;
 
-	gpu_code << "__global__ void " << stencil_name << " (double *d_in, double *d_out)\n";
+	gpu_code << "__global__ void dr_" << stencil_name << " (double *d_in, double *d_out)\n";
 	gpu_code << "{" << std::endl;
 	// index i
 	gpu_code << std::string(indent_cnt, '\t') << "int i = " << (bmerge_x && mx > 1 ? std::to_string(mx) + "*" : "" ) 
@@ -568,7 +568,7 @@ void codeGen_2d::host_code_gen ()
 	host_code << R"(
 int main(int argc, char **argv)
 {
-	puts("Initiating...");
+	puts("Initiating ...");
 	double (*h_in)[N] = (double (*)[N]) getRandom2DArray (M, N);
 	double (*h_out)[N] = (double (*)[N]) getZero2DArray (M, N);
 
@@ -599,17 +599,17 @@ int main(int argc, char **argv)
 
     host_code << R"(
 
-	puts("GPU computing...");
+	puts("GPU computing ...");
 
 	// warm up
 	for (int i = 0; i < 10; i ++) {)" << std::endl;	
-	host_code << indent << indent << stencil_name << "<<<grid_config, block_config>>> (in, out);" << std::endl;
-	host_code << indent << "}" << std::endl << std::endl;
+	host_code << indent << indent << "dr_" << stencil_name << "<<<grid_config, block_config>>> (in, out);" << std::endl;
+	host_code << indent << "} " << std::endl << std::endl;
 	//host_code << indent << "cudaEventRecord (startTime, 0);" << std::endl;
 	host_code << indent << "double startTime = get_time();" << std::endl;
 	host_code << indent << "for (int t = 0; t < Iterations; t += " << 2 * dr_stencil->get_step_num () <<") {" << std::endl;
-	host_code << indent << indent << stencil_name << "<<<grid_config, block_config>>> (in, out);" << std::endl;
-	host_code << indent << indent << stencil_name << "<<<grid_config, block_config>>> (out, in);" << std::endl;
+	host_code << indent << indent << "dr_" << stencil_name << "<<<grid_config, block_config>>> (in, out);" << std::endl;
+	host_code << indent << indent << "dr_" << stencil_name << "<<<grid_config, block_config>>> (out, in);" << std::endl;
 	host_code << indent << R"(}
 	cudaDeviceSynchronize();
 	double endTime = get_time();

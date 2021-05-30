@@ -4,7 +4,7 @@
 # include <sstream>
 # include <vector>
 # include <tuple>
-# include "autoFS.hpp"
+# include "drstencil.hpp"
 
 
 class codeGen 
@@ -145,7 +145,7 @@ void codeGen::gpu_code_gen ()
 	std::string indent = "\t";
     int indent_cnt = 1;
 
-	gpu_code << "__global__ void " << stencil_name << " (double *d_in, double *d_out)\n";
+	gpu_code << "__global__ void dr_" << stencil_name << " (double *d_in, double *d_out)\n";
 	gpu_code << "{" << std::endl;
 	// index i
 	gpu_code << std::string(indent_cnt, '\t') << "int i = " << (bmerge_x && mx > 1 ? std::to_string(mx) + "*" : "" ) 
@@ -295,7 +295,7 @@ void codeGen::gpu_code_gen ()
     if (prefetch) {
         gpu_code << std::string(indent_cnt, '\t') << "pre"
                 << (my > 1 ? "[0]" : "") << (mx > 1 ? "[0]" : "") 
-                << " = in[k+" << range - 1 << "][j0][i0];" << std::endl;
+                << " = in[k+" << high_k + 1 << "][j0][i0];" << std::endl;
         for (int j = 0; j < my; j ++)
         for (int i = 0; i < mx; i ++) {
             if (i > 0 || j > 0)
@@ -365,7 +365,7 @@ void codeGen::gpu_code_gen ()
         gpu_code << std::string(indent_cnt, '\t') << "// prefetching input data for next iteration" << std::endl;
         gpu_code << std::string(indent_cnt, '\t') << "pre"
                 << (my > 1 ? "[0]" : "") << (mx > 1 ? "[0]" : "") 
-                << " = in[k+" << range - 1 << "][j0][i0];" << std::endl;
+                << " = in[k+" << high_k + 1 << "][j0][i0];" << std::endl;
         for (int j = 0; j < my; j ++)
         for (int i = 0; i < mx; i ++) {
             if (i > 0 || j > 0)
@@ -472,7 +472,7 @@ void codeGen::gpu_code_gen ()
 	    gpu_code << std::string(indent_cnt ++, '\t') << "if (k+1 < k_ed) {" << std::endl;
         gpu_code << std::string(indent_cnt, '\t') << "pre"
                 << (my > 1 ? "[0]" : "") << (mx > 1 ? "[0]" : "") 
-                << " = in[k+" << range - 1 << "][j0][i0];" << std::endl;
+                << " = in[k+" << high_k + 1 << "][j0][i0];" << std::endl;
         for (int j = 0; j < my; j ++)
         for (int i = 0; i < mx; i ++) {
             if (i > 0 || j > 0)
@@ -551,7 +551,7 @@ void codeGen::host_code_gen ()
 	host_code << R"(
 int main(int argc, char **argv)
 {
-	puts("Initiating...");
+	puts("Initiating ...");
 	double (*h_in)[M][N] = (double (*)[M][N]) getRandom3DArray (L, M, N);
 	double (*h_out)[M][N] = (double (*)[M][N]) getZero3DArray (L, M, N);
 
@@ -570,17 +570,17 @@ int main(int argc, char **argv)
 	host_code << (mx > 1 ? std::to_string(mx) + "*" : "") << "Bx-Halo*2), ceil(M, ";
 	host_code << (my > 1 ? std::to_string(my) + "*" : "") << R"(By-Halo*2), ceil(L, Sn));
 
-	puts("GPU computing...");
+	puts("GPU computing ...");
 
 	// warm up
 	for (int i = 0; i < 10; i ++) {)" << std::endl;	
-	host_code << indent << indent << stencil_name << "<<<grid_config, block_config>>> (in, out);" << std::endl;
+	host_code << indent << indent << "dr_" << stencil_name << "<<<grid_config, block_config>>> (in, out);" << std::endl;
 	host_code << indent << "}" << std::endl << std::endl;
 	//host_code << indent << "cudaEventRecord (startTime, 0);" << std::endl;
 	host_code << indent << "double startTime = get_time();" << std::endl;
 	host_code << indent << "for (int t = 0; t < Iterations; t += " << 2 * dr_stencil->get_step_num () <<") {" << std::endl;
-	host_code << indent << indent << stencil_name << "<<<grid_config, block_config>>> (in, out);" << std::endl;
-	host_code << indent << indent << stencil_name << "<<<grid_config, block_config>>> (out, in);" << std::endl;
+	host_code << indent << indent << "dr_" << stencil_name << "<<<grid_config, block_config>>> (in, out);" << std::endl;
+	host_code << indent << indent << "dr_" << stencil_name << "<<<grid_config, block_config>>> (out, in);" << std::endl;
 	host_code << indent << R"(}
 	cudaDeviceSynchronize();
 	double endTime = get_time();
