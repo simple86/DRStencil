@@ -20,6 +20,7 @@ Given the neccessary stencil parameters in a `.stc` file, `DRStencil` generates 
   Copy the executable `drstencil` into the test directory, `2d5pt_star` for instance. By launching the script `starter.sh`, you can start tuning GPU code for the stencil `2d5pt_star`. The script generates hundreds or thousands of optimazation configurations and profiles each of them with `Nsight Compute`. The profiling results will be located in `prof/` directory.
   ```bash
   cd benchmarks/2d5pt_star/
+  cp ../../drstencil .
   ./starter.sh
   ```
   To collect the GPU metrics, launch the script `getGpuMetrics.sh`. (Note that the script is only supported by `Nsight Compute 2020.3`. Some modification need to be made for other versions.)
@@ -36,4 +37,4 @@ Given the neccessary stencil parameters in a `.stc` file, `DRStencil` generates 
   ```
   To Create a new test, you need a `.stc` file like benchmarks/2d5pt_star/2d5pt_star.stc, which defines the stencil computation.
 ## PUBLICATION
-  [HPCC 2021] 
+  [HPCC 2021] *DRStencil: Exploiting Data Reuse Within Low-Order Stencil on GPU.*
