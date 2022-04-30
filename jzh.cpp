@@ -1,3 +1,0 @@
-iii
-#include<iostream>
-
